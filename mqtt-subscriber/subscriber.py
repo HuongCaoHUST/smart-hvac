@@ -16,6 +16,7 @@ DB_USER = os.getenv('DB_USER', 'admin')
 DB_PASS = os.getenv('DB_PASSWORD', 'admin123')
 API_HOST = os.getenv('API_HOST', '0.0.0.0')
 API_PORT = int(os.getenv('API_PORT', '5000'))
+CONTROL_TOPIC = os.getenv('CONTROL_TOPIC', 'remote-control')
 
 # ====================== DATABASE ======================
 def get_db_connection():
@@ -195,10 +196,60 @@ class TelemetryRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
 
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != '/api/remote-control':
+            self.send_response(404)
+            self.send_common_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': 'Not found'}).encode('utf-8'))
+            return
+
+        try:
+            content_length = int(self.headers.get('Content-Length', '0'))
+            raw_body = self.rfile.read(content_length).decode('utf-8')
+            payload = json.loads(raw_body or '{}')
+
+            command = {
+                'device_id': payload.get('device_id', 'hvac-01'),
+                'power': bool(payload.get('power')),
+                'temp': to_float(payload.get('temp')),
+                'operationMode': payload.get('operationMode'),
+                'fanPower': payload.get('fanPower'),
+            }
+
+            if command['temp'] is None:
+                raise ValueError('temp is required')
+            if command['operationMode'] not in ['cool', 'heat', 'fan']:
+                raise ValueError('operationMode must be cool, heat, or fan')
+            if command['fanPower'] not in ['low', 'medium', 'high', 'auto']:
+                raise ValueError('fanPower must be low, medium, high, or auto')
+
+            result = client.publish(CONTROL_TOPIC, json.dumps(command), qos=1)
+            result.wait_for_publish(timeout=3)
+
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                raise RuntimeError(f'MQTT publish failed with code {result.rc}')
+
+            body = json.dumps({
+                'ok': True,
+                'topic': CONTROL_TOPIC,
+                'command': command,
+            }).encode('utf-8')
+            self.send_response(200)
+            self.send_common_headers()
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception as e:
+            self.send_response(400)
+            self.send_common_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({'error': str(e)}).encode('utf-8'))
+
     def send_common_headers(self):
         self.send_header('Content-Type', 'application/json')
         self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
 
     def log_message(self, format, *args):

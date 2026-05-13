@@ -36,3 +36,11 @@ export interface HVACState {
   targetTemp: number;
   fanSpeed: 'low' | 'medium' | 'high' | 'auto';
 }
+
+export interface RemoteControlPayload {
+  device_id: string;
+  power: boolean;
+  temp: number;
+  operationMode: HVACState['mode'];
+  fanPower: HVACState['fanSpeed'];
+}

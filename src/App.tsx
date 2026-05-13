@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MetricCard } from './components/MetricCard';
 import { RealTimeChart } from './components/RealTimeChart';
 import { ControlPanel } from './components/ControlPanel';
-import { SensorReading, ChartDataPoint, HVACState, Status, TelemetryResponse } from './types';
+import { SensorReading, ChartDataPoint, HVACState, Status, TelemetryResponse, RemoteControlPayload } from './types';
 import { cn } from './lib/utils';
 
 // Helper to determine status based on thresholds
@@ -58,6 +58,30 @@ export default function App() {
     targetTemp: 21.0,
     fanSpeed: 'medium',
   });
+
+  const sendRemoteControl = useCallback(async (nextState: HVACState) => {
+    const payload: RemoteControlPayload = {
+      device_id: 'hvac-01',
+      power: nextState.power,
+      temp: nextState.targetTemp,
+      operationMode: nextState.mode,
+      fanPower: nextState.fanSpeed,
+    };
+
+    try {
+      const response = await fetch('/api/remote-control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Remote control request failed: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  }, []);
 
   // --- DATABASE TELEMETRY ---
   useEffect(() => {
@@ -216,7 +240,7 @@ export default function App() {
           {/* Dashbaord Right Section: Controls & Status */}
           <div className="lg:col-span-4 space-y-6">
             
-            <ControlPanel state={hvacState} setState={setHvacState} />
+            <ControlPanel state={hvacState} setState={setHvacState} onControlChange={sendRemoteControl} />
 
             {/* Security/Access Status */}
             <div className="bg-white rounded-lg p-6 border border-slate-200 shadow-sm">

@@ -7,17 +7,24 @@ import { cn } from '../lib/utils';
 interface ControlPanelProps {
   state: HVACState;
   setState: React.Dispatch<React.SetStateAction<HVACState>>;
+  onControlChange: (state: HVACState) => void;
 }
 
-export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState }) => {
-  const togglePower = () => setState(prev => ({ ...prev, power: !prev.power }));
+export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onControlChange }) => {
+  const updateControl = (getNextState: (state: HVACState) => HVACState) => {
+    const next = getNextState(state);
+    setState(next);
+    onControlChange(next);
+  };
+
+  const togglePower = () => updateControl(prev => ({ ...prev, power: !prev.power }));
   
-  const setMode = (mode: HVACState['mode']) => setState(prev => ({ ...prev, mode }));
+  const setMode = (mode: HVACState['mode']) => updateControl(prev => ({ ...prev, mode }));
   
   const adjustTemp = (delta: number) => 
-    setState(prev => ({ ...prev, targetTemp: Math.round((Math.min(30, Math.max(16, prev.targetTemp + delta))) * 2) / 2 }));
+    updateControl(prev => ({ ...prev, targetTemp: Math.round((Math.min(30, Math.max(16, prev.targetTemp + delta))) * 2) / 2 }));
 
-  const setFanSpeed = (fanSpeed: HVACState['fanSpeed']) => setState(prev => ({ ...prev, fanSpeed }));
+  const setFanSpeed = (fanSpeed: HVACState['fanSpeed']) => updateControl(prev => ({ ...prev, fanSpeed }));
 
   const modeColors: Record<string, string> = {
     cool: 'text-blue-500 bg-blue-50 border-blue-200',
@@ -156,4 +163,3 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState }) =
     </div>
   );
 };
-

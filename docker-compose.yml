@@ -52,6 +52,7 @@ services:
       DB_USER: admin
       DB_PASSWORD: admin123
       API_PORT: 5000
+      CONTROL_TOPIC: remote-control
       PYTHONUNBUFFERED: 1
 
 volumes:
