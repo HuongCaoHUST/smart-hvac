@@ -204,7 +204,7 @@ export default function App() {
   const activeAlerts = useMemo(() => readings.filter(r => r.status !== 'good').length, [readings]);
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-900 overflow-x-hidden selection:bg-blue-500/20">
+    <div className="min-h-screen bg-slate-100 text-slate-900 overflow-x-clip selection:bg-blue-500/20">
       {/* --- TOP BAR --- */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-md border-b border-slate-200 z-50 px-4 md:px-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
