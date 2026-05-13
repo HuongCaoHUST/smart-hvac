@@ -28,6 +28,7 @@ export interface TelemetryResponse {
     time: string | null;
   };
   history: ChartDataPoint[];
+  controlState: RemoteControlState | null;
 }
 
 export interface HVACState {
@@ -43,4 +44,8 @@ export interface RemoteControlPayload {
   temp: number;
   operationMode: HVACState['mode'];
   fanPower: HVACState['fanSpeed'];
+}
+
+export interface RemoteControlState extends RemoteControlPayload {
+  time: string;
 }

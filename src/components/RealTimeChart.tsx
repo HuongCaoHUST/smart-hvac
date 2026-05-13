@@ -88,6 +88,7 @@ export const RealTimeChart: React.FC<RealTimeChartProps> = ({ data }) => {
               strokeWidth={2}
               fillOpacity={1}
               fill="url(#colorTemp)"
+              isAnimationActive={false}
             />
             <Area
               type="monotone"
@@ -97,6 +98,7 @@ export const RealTimeChart: React.FC<RealTimeChartProps> = ({ data }) => {
               strokeWidth={2}
               fillOpacity={1}
               fill="url(#colorOutdoorTemp)"
+              isAnimationActive={false}
             />
           </AreaChart>
         </ResponsiveContainer>

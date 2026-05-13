@@ -82,6 +82,7 @@ export default function App() {
     fanSpeed: 'medium',
   });
   const [hanoiWeather, setHanoiWeather] = useState<HanoiWeather | null>(null);
+  const [isControlStateReady, setIsControlStateReady] = useState(false);
 
   const sendRemoteControl = useCallback(async (nextState: HVACState) => {
     const payload: RemoteControlPayload = {
@@ -131,6 +132,17 @@ export default function App() {
 
         const telemetry: TelemetryResponse = await response.json();
         setHistory(telemetry.history);
+        setIsControlStateReady(prevReady => {
+          if (!prevReady && telemetry.controlState) {
+            setHvacState({
+              power: telemetry.controlState.power,
+              mode: telemetry.controlState.operationMode,
+              targetTemp: telemetry.controlState.temp,
+              fanSpeed: telemetry.controlState.fanPower,
+            });
+          }
+          return true;
+        });
         setReadings(prev => prev.map(reading => {
           if (reading.id === 'temp') return updateReading(reading, telemetry.latest.temperature);
           if (reading.id === 'humidity') return updateReading(reading, telemetry.latest.humidity);
@@ -303,7 +315,37 @@ export default function App() {
           {/* Dashbaord Right Section: Controls & Status */}
           <div className="lg:col-span-4 space-y-6">
             
-            <ControlPanel state={hvacState} setState={setHvacState} onControlChange={sendRemoteControl} />
+            {isControlStateReady ? (
+              <ControlPanel state={hvacState} setState={setHvacState} onControlChange={sendRemoteControl} />
+            ) : (
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xl h-full min-h-[560px] flex flex-col">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">AC Unit 01</h3>
+                    <div className="flex items-center gap-2 mt-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-slate-300 animate-pulse" />
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Loading State</span>
+                    </div>
+                  </div>
+                  <div className="w-11 h-11 rounded-full bg-slate-100 animate-pulse" />
+                </div>
+                <div className="flex-1 flex flex-col items-center justify-center gap-8">
+                  <div className="w-full aspect-square max-w-[200px] rounded-full border-8 border-slate-50 bg-slate-50 animate-pulse" />
+                  <div className="w-full space-y-3">
+                    <div className="h-3 w-32 mx-auto bg-slate-100 rounded animate-pulse" />
+                    <div className="grid grid-cols-3 gap-3">
+                      {[0, 1, 2].map((item) => (
+                        <div key={item} className="h-20 rounded-2xl bg-slate-50 border-2 border-slate-50 animate-pulse" />
+                      ))}
+                    </div>
+                  </div>
+                  <div className="w-full space-y-3">
+                    <div className="h-3 w-24 bg-slate-100 rounded animate-pulse" />
+                    <div className="h-12 rounded-xl bg-slate-50 border border-slate-100 animate-pulse" />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Weather */}
             <div className="bg-white rounded-lg p-5 border border-slate-200 shadow-sm">

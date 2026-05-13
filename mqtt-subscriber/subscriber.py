@@ -49,8 +49,19 @@ CREATE TABLE IF NOT EXISTS sensor_data (
     PRIMARY KEY (time, device_id)
 );
 
+CREATE TABLE IF NOT EXISTS remote_control_state (
+    time TIMESTAMPTZ NOT NULL,
+    device_id TEXT NOT NULL,
+    power BOOLEAN NOT NULL,
+    temp FLOAT NOT NULL,
+    operation_mode TEXT NOT NULL,
+    fan_power TEXT NOT NULL,
+    PRIMARY KEY (time, device_id)
+);
+
 ALTER TABLE sensor_data ADD COLUMN IF NOT EXISTS outdoor_temperature FLOAT;
 SELECT create_hypertable('sensor_data', 'time', if_not_exists => TRUE);
+SELECT create_hypertable('remote_control_state', 'time', if_not_exists => TRUE);
 """)
 conn.commit()
 
@@ -87,6 +98,14 @@ def fetch_telemetry():
                 LIMIT 200
             """)
             rows = api_cur.fetchall()
+
+            api_cur.execute("""
+                SELECT time, device_id, power, temp, operation_mode, fan_power
+                FROM remote_control_state
+                ORDER BY time DESC
+                LIMIT 1
+            """)
+            control_row = api_cur.fetchone()
 
     latest_primary = None
     latest_outdoor = None
@@ -164,10 +183,36 @@ def fetch_telemetry():
             'pm25': row[6],
         })
 
+    control_state = None
+    if control_row:
+        control_state = {
+            'time': control_row[0].isoformat(),
+            'device_id': control_row[1],
+            'power': control_row[2],
+            'temp': control_row[3],
+            'operationMode': control_row[4],
+            'fanPower': control_row[5],
+        }
+
     return {
         'latest': latest,
         'history': history[-20:],
+        'controlState': control_state,
     }
+
+def save_remote_control_state(command):
+    with get_db_connection() as control_conn:
+        with control_conn.cursor() as control_cur:
+            control_cur.execute("""
+                INSERT INTO remote_control_state (time, device_id, power, temp, operation_mode, fan_power)
+                VALUES (NOW(), %s, %s, %s, %s, %s)
+            """, (
+                command['device_id'],
+                command['power'],
+                command['temp'],
+                command['operationMode'],
+                command['fanPower'],
+            ))
 
 class TelemetryRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -230,6 +275,8 @@ class TelemetryRequestHandler(BaseHTTPRequestHandler):
 
             if result.rc != mqtt.MQTT_ERR_SUCCESS:
                 raise RuntimeError(f'MQTT publish failed with code {result.rc}')
+
+            save_remote_control_state(command)
 
             body = json.dumps({
                 'ok': True,
