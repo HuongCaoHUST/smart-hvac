@@ -16,7 +16,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { MetricCard } from './components/MetricCard';
 import { RealTimeChart } from './components/RealTimeChart';
 import { ControlPanel } from './components/ControlPanel';
-import { SensorReading, ChartDataPoint, HVACState, Status } from './types';
+import { SensorReading, ChartDataPoint, HVACState, Status, TelemetryResponse } from './types';
 import { cn } from './lib/utils';
 
 // Helper to determine status based on thresholds
@@ -59,47 +59,47 @@ export default function App() {
     fanSpeed: 'medium',
   });
 
-  // --- DATA SIMULATION ---
+  // --- DATABASE TELEMETRY ---
   useEffect(() => {
-    const interval = setInterval(() => {
-      setReadings(prev => prev.map(reading => {
-        // Subtle random fluctuations
-        const delta = (Math.random() - 0.5) * (reading.id === 'co2' ? 5 : 0.2);
-        const newValue = Math.max(0, reading.value + delta);
-        
-        // Occasional anomaly injection for CO2 or PM2.5 to show "Critical" state
-        const isAnomaly = Math.random() > 0.98;
-        const injectedValue = isAnomaly 
-          ? (reading.id === 'co2' ? 1100 : reading.id === 'pm25' ? 40 : newValue)
-          : newValue;
+    const updateReading = (reading: SensorReading, nextValue: number | null): SensorReading => {
+      if (nextValue === null || Number.isNaN(nextValue)) {
+        return reading;
+      }
 
-        return {
-          ...reading,
-          value: injectedValue,
-          status: getStatus(reading.id, injectedValue),
-          trend: ((injectedValue - reading.value) / reading.value) * 100,
-        };
-      }));
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Update history for chart
-  useEffect(() => {
-    const now = new Date();
-    const timeStr = `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-    
-    const newPoint: ChartDataPoint = {
-      time: timeStr,
-      temp: readings.find(r => r.id === 'temp')?.value || 0,
-      humidity: readings.find(r => r.id === 'humidity')?.value || 0,
-      co2: readings.find(r => r.id === 'co2')?.value || 0,
-      pm25: readings.find(r => r.id === 'pm25')?.value || 0,
+      return {
+        ...reading,
+        value: nextValue,
+        status: getStatus(reading.id, nextValue),
+        trend: reading.value === 0 ? 0 : ((nextValue - reading.value) / reading.value) * 100,
+      };
     };
 
-    setHistory(prev => [...prev.slice(-19), newPoint]);
-  }, [readings]);
+    const fetchTelemetry = async () => {
+      try {
+        const response = await fetch('/api/telemetry');
+        if (!response.ok) {
+          throw new Error(`Telemetry request failed: ${response.status}`);
+        }
+
+        const telemetry: TelemetryResponse = await response.json();
+        setHistory(telemetry.history);
+        setReadings(prev => prev.map(reading => {
+          if (reading.id === 'temp') return updateReading(reading, telemetry.latest.temperature);
+          if (reading.id === 'humidity') return updateReading(reading, telemetry.latest.humidity);
+          if (reading.id === 'co2') return updateReading(reading, telemetry.latest.co2);
+          if (reading.id === 'pm25') return updateReading(reading, telemetry.latest.dust);
+          return reading;
+        }));
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    fetchTelemetry();
+    const interval = window.setInterval(fetchTelemetry, 2000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   // Derived stats
   const activeAlerts = useMemo(() => readings.filter(r => r.status !== 'good').length, [readings]);
@@ -283,4 +283,3 @@ export default function App() {
     </div>
   );
 }
-

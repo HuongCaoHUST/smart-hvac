@@ -27,7 +27,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
                 {entry.name}
               </span>
               <span className="text-xs font-mono font-bold" style={{ color: entry.color }}>
-                {entry.value.toFixed(1)}
+                {typeof entry.value === 'number' ? entry.value.toFixed(1) : '--'}
               </span>
             </div>
           ))}
@@ -56,7 +56,7 @@ export const RealTimeChart: React.FC<RealTimeChartProps> = ({ data }) => {
                 <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
                 <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
               </linearGradient>
-              <linearGradient id="colorHum" x1="0" y1="0" x2="0" y2="1">
+              <linearGradient id="colorOutdoorTemp" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
                 <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
               </linearGradient>
@@ -83,7 +83,7 @@ export const RealTimeChart: React.FC<RealTimeChartProps> = ({ data }) => {
             <Area
               type="monotone"
               dataKey="temp"
-              name="Temperature"
+              name="Indoor Temperature"
               stroke="#3b82f6"
               strokeWidth={2}
               fillOpacity={1}
@@ -91,12 +91,12 @@ export const RealTimeChart: React.FC<RealTimeChartProps> = ({ data }) => {
             />
             <Area
               type="monotone"
-              dataKey="humidity"
-              name="Humidity"
+              dataKey="outdoorTemp"
+              name="Outdoor Temperature"
               stroke="#10b981"
               strokeWidth={2}
               fillOpacity={1}
-              fill="url(#colorHum)"
+              fill="url(#colorOutdoorTemp)"
             />
           </AreaChart>
         </ResponsiveContainer>

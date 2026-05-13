@@ -12,10 +12,22 @@ export interface SensorReading {
 
 export interface ChartDataPoint {
   time: string;
-  temp: number;
-  humidity: number;
-  co2: number;
-  pm25: number;
+  temp: number | null;
+  outdoorTemp: number | null;
+  co2: number | null;
+  pm25: number | null;
+}
+
+export interface TelemetryResponse {
+  latest: {
+    temperature: number | null;
+    outdoor_temperature: number | null;
+    humidity: number | null;
+    co2: number | null;
+    dust: number | null;
+    time: string | null;
+  };
+  history: ChartDataPoint[];
 }
 
 export interface HVACState {
