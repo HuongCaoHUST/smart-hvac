@@ -9,8 +9,10 @@ import {
   User, 
   LayoutDashboard, 
   History,
-  ShieldAlert,
-  AlertTriangle
+  AlertTriangle,
+  CloudRain,
+  CloudSun,
+  MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MetricCard } from './components/MetricCard';
@@ -42,6 +44,27 @@ const getStatus = (id: string, value: number): Status => {
   return 'good';
 };
 
+interface HanoiWeather {
+  temperature: number;
+  apparentTemperature: number;
+  humidity: number;
+  windSpeed: number;
+  minTemp: number;
+  maxTemp: number;
+  precipitationProbability: number;
+  weatherCode: number;
+}
+
+const getWeatherLabel = (code: number) => {
+  if (code === 0) return 'Clear';
+  if ([1, 2, 3].includes(code)) return 'Partly Cloudy';
+  if ([45, 48].includes(code)) return 'Foggy';
+  if ([51, 53, 55, 56, 57].includes(code)) return 'Drizzle';
+  if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) return 'Rain';
+  if ([95, 96, 99].includes(code)) return 'Thunderstorm';
+  return 'Cloudy';
+};
+
 export default function App() {
   // --- STATE ---
   const [readings, setReadings] = useState<SensorReading[]>([
@@ -58,6 +81,7 @@ export default function App() {
     targetTemp: 21.0,
     fanSpeed: 'medium',
   });
+  const [hanoiWeather, setHanoiWeather] = useState<HanoiWeather | null>(null);
 
   const sendRemoteControl = useCallback(async (nextState: HVACState) => {
     const payload: RemoteControlPayload = {
@@ -121,6 +145,45 @@ export default function App() {
 
     fetchTelemetry();
     const interval = window.setInterval(fetchTelemetry, 2000);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
+  // --- WEATHER ---
+  useEffect(() => {
+    const fetchHanoiWeather = async () => {
+      try {
+        const params = new URLSearchParams({
+          latitude: '21.0245',
+          longitude: '105.8412',
+          current: 'temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m',
+          daily: 'temperature_2m_max,temperature_2m_min,precipitation_probability_max',
+          timezone: 'Asia/Bangkok',
+          forecast_days: '1',
+        });
+        const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+        if (!response.ok) {
+          throw new Error(`Weather request failed: ${response.status}`);
+        }
+
+        const weather = await response.json();
+        setHanoiWeather({
+          temperature: weather.current.temperature_2m,
+          apparentTemperature: weather.current.apparent_temperature,
+          humidity: weather.current.relative_humidity_2m,
+          windSpeed: weather.current.wind_speed_10m,
+          weatherCode: weather.current.weather_code,
+          minTemp: weather.daily.temperature_2m_min[0],
+          maxTemp: weather.daily.temperature_2m_max[0],
+          precipitationProbability: weather.daily.precipitation_probability_max[0],
+        });
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    fetchHanoiWeather();
+    const interval = window.setInterval(fetchHanoiWeather, 2 * 60 * 60 * 1000);
 
     return () => window.clearInterval(interval);
   }, []);
@@ -242,30 +305,49 @@ export default function App() {
             
             <ControlPanel state={hvacState} setState={setHvacState} onControlChange={sendRemoteControl} />
 
-            {/* Security/Access Status */}
-            <div className="bg-white rounded-lg p-6 border border-slate-200 shadow-sm">
-               <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-emerald-500/10 rounded">
-                    <ShieldAlert className="w-5 h-5 text-emerald-500" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider">Access Integrity</h4>
-                    <p className="text-[10px] text-slate-400">System secured by AES-256</p>
+            {/* Weather */}
+            <div className="bg-white rounded-lg p-5 border border-slate-200 shadow-sm">
+               <div className="flex items-center justify-between mb-4">
+                  <h4 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Weather</h4>
+                  <div className="flex items-center gap-1 text-[10px] text-slate-400 font-medium uppercase">
+                    <MapPin className="w-3 h-3" />
+                    Today
                   </div>
                </div>
-               <div className="p-3 bg-slate-50 rounded border border-slate-200">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-[10px] text-slate-500 uppercase font-medium">Firewall Status</span>
-                    <span className="text-[10px] font-bold text-emerald-600 uppercase">Active</span>
+                {hanoiWeather ? (
+                  <div className="space-y-4">
+                    {[
+                      { item: 'Current Temperature', status: `${hanoiWeather.temperature.toFixed(1)}°C`, color: 'text-blue-600' },
+                      { item: 'Condition', status: getWeatherLabel(hanoiWeather.weatherCode), color: 'text-sky-600' },
+                      { item: 'Feels Like', status: `${hanoiWeather.apparentTemperature.toFixed(1)}°C`, color: 'text-slate-600' },
+                    ].map((step) => (
+                      <div key={step.item} className="flex justify-between items-center border-b border-slate-100 pb-2">
+                         <span className="text-xs text-slate-600 font-medium">{step.item}</span>
+                         <span className={cn("text-[10px] font-bold uppercase", step.color)}>{step.status}</span>
+                      </div>
+                    ))}
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                      {[
+                        { label: 'Humidity', value: `${hanoiWeather.humidity}%`, icon: Droplets },
+                        { label: 'Wind', value: `${hanoiWeather.windSpeed.toFixed(1)} km/h`, icon: Wind },
+                        { label: 'High / Low', value: `${hanoiWeather.maxTemp.toFixed(1)} / ${hanoiWeather.minTemp.toFixed(1)}°C`, icon: Thermometer },
+                        { label: 'Rain Chance', value: `${hanoiWeather.precipitationProbability}%`, icon: CloudRain },
+                      ].map((item) => (
+                        <div key={item.label} className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2">
+                          <div className="flex items-center gap-1.5 text-slate-400 mb-1">
+                            <item.icon className="w-3 h-3" />
+                            <span className="text-[9px] font-bold uppercase">{item.label}</span>
+                          </div>
+                          <p className="text-xs font-mono font-bold text-slate-700">{item.value}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="h-1 w-full bg-slate-200 rounded-full overflow-hidden">
-                    <motion.div 
-                      initial={{ width: 0 }}
-                      animate={{ width: '100%' }}
-                      className="h-full bg-emerald-500"
-                    />
+                ) : (
+                  <div className="h-28 flex items-center justify-center">
+                    <span className="text-xs text-slate-400 font-medium">Loading weather...</span>
                   </div>
-               </div>
+                )}
             </div>
 
             {/* Notification Center */}
