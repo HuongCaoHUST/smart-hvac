@@ -7,7 +7,6 @@ import {
   Maximize2, 
   Bell, 
   User, 
-  LayoutDashboard, 
   History,
   AlertTriangle,
   CloudRain,
@@ -15,6 +14,7 @@ import {
   MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import mainLogo from '../img/main_logo_2.png';
 import { MetricCard } from './components/MetricCard';
 import { RealTimeChart } from './components/RealTimeChart';
 import { ControlPanel } from './components/ControlPanel';
@@ -208,16 +208,7 @@ export default function App() {
       {/* --- TOP BAR --- */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white/80 backdrop-blur-md border-b border-slate-200 z-50 px-4 md:px-8 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-600 rounded flex items-center justify-center">
-            <LayoutDashboard className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold tracking-tighter uppercase text-slate-900">HVAC Sentinel</h1>
-            <div className="flex items-center gap-2">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">Streaming Live Telemetry</span>
-            </div>
-          </div>
+          <img src={mainLogo} alt="HVAC Sentinel Logo" className="h-10 object-contain" />
         </div>
 
         <div className="flex items-center gap-4">

@@ -15,9 +15,18 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
+#include "cJSON.h"
+#include "led_strip.h"
+
+#define LED_STRIP_GPIO 48 // ESP32-S3 DevKitC mặc định dùng GPIO 48 cho RGB LED
+#define LED_STRIP_MAX_LEDS 1
+
+static led_strip_handle_t led_strip;
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
+
+#include "mqtt_app.h"
 
 /* The examples use WiFi configuration that you can set via project configuration menu
 
@@ -92,6 +101,44 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+static void my_mqtt_data_cb(const char *topic, const char *data, int data_len)
+{
+    ESP_LOGI(TAG, "MQTT Message Received:");
+    ESP_LOGI(TAG, "Topic: %s", topic);
+    ESP_LOGI(TAG, "Data: %.*s", data_len, data);
+
+    // Cấp phát bộ nhớ để thêm ký tự null kết thúc chuỗi (vì data từ MQTT có thể không có)
+    char *json_str = malloc(data_len + 1);
+    if (json_str == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for JSON string");
+        return;
+    }
+    
+    memcpy(json_str, data, data_len);
+    json_str[data_len] = '\0';
+    
+    cJSON *root = cJSON_Parse(json_str);
+    if (root == NULL) {
+        ESP_LOGE(TAG, "Failed to parse JSON");
+    } else {
+        cJSON *power = cJSON_GetObjectItem(root, "power");
+        if (cJSON_IsBool(power)) {
+            int level = cJSON_IsTrue(power) ? 1 : 0;
+            if (level) {
+                // Đèn sáng màu xanh lá (Green) khi bật. Có thể đổi tham số RGB (Red, Green, Blue) từ 0-255
+                led_strip_set_pixel(led_strip, 0, 0, 255, 0); 
+                led_strip_refresh(led_strip);
+            } else {
+                led_strip_clear(led_strip);
+            }
+            ESP_LOGI(TAG, "RGB LED power state is now: %s", level ? "ON" : "OFF");
+        }
+        cJSON_Delete(root);
+    }
+    
+    free(json_str);
+}
+
 void wifi_init_sta(void)
 {
     s_wifi_event_group = xEventGroupCreate();
@@ -153,6 +200,9 @@ void wifi_init_sta(void)
     if (bits & WIFI_CONNECTED_BIT) {
         ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
                  EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
+        
+        /* Start MQTT client and listen to remote-control/# */
+        mqtt_app_start("mqtt://103.90.225.155", "remote-control/#", my_mqtt_data_cb);
     } else if (bits & WIFI_FAIL_BIT) {
         ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
                  EXAMPLE_ESP_WIFI_SSID, EXAMPLE_ESP_WIFI_PASS);
@@ -163,6 +213,18 @@ void wifi_init_sta(void)
 
 void app_main(void)
 {
+    // Cấu hình RGB LED Strip
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = LED_STRIP_GPIO,
+        .max_leds = LED_STRIP_MAX_LEDS, 
+    };
+    led_strip_rmt_config_t rmt_config = {
+        .resolution_hz = 10 * 1000 * 1000, // 10MHz
+        .flags.with_dma = false,
+    };
+    ESP_ERROR_CHECK(led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip));
+    led_strip_clear(led_strip); // Mặc định tắt LED ban đầu
+
     //Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {

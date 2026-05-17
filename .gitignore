@@ -10,3 +10,4 @@ mosquitto/data/*.db
 sdkconfig*
 esp/station/dependencies.lock
 esp/station/main/Kconfig.projbuild
+/esp/*
