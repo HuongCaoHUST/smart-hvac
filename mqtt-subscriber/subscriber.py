@@ -56,10 +56,14 @@ CREATE TABLE IF NOT EXISTS remote_control_state (
     temp FLOAT NOT NULL,
     operation_mode TEXT NOT NULL,
     fan_power TEXT NOT NULL,
+    client_id TEXT,
+    requested_at TIMESTAMPTZ,
     PRIMARY KEY (time, device_id)
 );
 
 ALTER TABLE sensor_data ADD COLUMN IF NOT EXISTS outdoor_temperature FLOAT;
+ALTER TABLE remote_control_state ADD COLUMN IF NOT EXISTS client_id TEXT;
+ALTER TABLE remote_control_state ADD COLUMN IF NOT EXISTS requested_at TIMESTAMPTZ;
 SELECT create_hypertable('sensor_data', 'time', if_not_exists => TRUE);
 SELECT create_hypertable('remote_control_state', 'time', if_not_exists => TRUE);
 """)
@@ -100,7 +104,7 @@ def fetch_telemetry():
             rows = api_cur.fetchall()
 
             api_cur.execute("""
-                SELECT time, device_id, power, temp, operation_mode, fan_power
+                SELECT time, device_id, power, temp, operation_mode, fan_power, client_id, requested_at
                 FROM remote_control_state
                 ORDER BY time DESC
                 LIMIT 1
@@ -192,6 +196,10 @@ def fetch_telemetry():
             'temp': control_row[3],
             'operationMode': control_row[4],
             'fanPower': control_row[5],
+            'clientId': control_row[6] or 'unknown',
+            'requestedAt': control_row[7].isoformat() if control_row[7] else control_row[0].isoformat(),
+            'lastModifiedAt': control_row[0].isoformat(),
+            'lastModifiedBy': control_row[6] or 'unknown',
         }
 
     return {
@@ -204,15 +212,27 @@ def save_remote_control_state(command):
     with get_db_connection() as control_conn:
         with control_conn.cursor() as control_cur:
             control_cur.execute("""
-                INSERT INTO remote_control_state (time, device_id, power, temp, operation_mode, fan_power)
-                VALUES (NOW(), %s, %s, %s, %s, %s)
+                INSERT INTO remote_control_state (time, device_id, power, temp, operation_mode, fan_power, client_id, requested_at)
+                VALUES (NOW(), %s, %s, %s, %s, %s, %s, %s)
+                RETURNING time, requested_at
             """, (
                 command['device_id'],
                 command['power'],
                 command['temp'],
                 command['operationMode'],
                 command['fanPower'],
+                command['clientId'],
+                command['requestedAt'],
             ))
+            saved_time, requested_at = control_cur.fetchone()
+
+    return {
+        **command,
+        'time': saved_time.isoformat(),
+        'requestedAt': requested_at.isoformat() if requested_at else saved_time.isoformat(),
+        'lastModifiedAt': saved_time.isoformat(),
+        'lastModifiedBy': command['clientId'],
+    }
 
 class TelemetryRequestHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -261,6 +281,8 @@ class TelemetryRequestHandler(BaseHTTPRequestHandler):
                 'temp': to_float(payload.get('temp')),
                 'operationMode': payload.get('operationMode'),
                 'fanPower': payload.get('fanPower'),
+                'clientId': payload.get('clientId') or 'unknown',
+                'requestedAt': payload.get('requestedAt') or time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
             }
 
             if command['temp'] is None:
@@ -276,12 +298,12 @@ class TelemetryRequestHandler(BaseHTTPRequestHandler):
             if result.rc != mqtt.MQTT_ERR_SUCCESS:
                 raise RuntimeError(f'MQTT publish failed with code {result.rc}')
 
-            save_remote_control_state(command)
+            saved_command = save_remote_control_state(command)
 
             body = json.dumps({
                 'ok': True,
                 'topic': CONTROL_TOPIC,
-                'command': command,
+                'command': saved_command,
             }).encode('utf-8')
             self.send_response(200)
             self.send_common_headers()

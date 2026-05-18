@@ -1,20 +1,18 @@
 import React from 'react';
-import { Power, Wind, Sun, Snowflake, Plus, Minus, Fan, Thermometer } from 'lucide-react';
+import { Power, Wind, Sun, Snowflake, Plus, Minus, Fan, Thermometer, LoaderCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { HVACState } from '../types';
 import { cn } from '../lib/utils';
 
 interface ControlPanelProps {
   state: HVACState;
-  setState: React.Dispatch<React.SetStateAction<HVACState>>;
-  onControlChange: (state: HVACState) => void;
+  pendingFields: Partial<Record<keyof HVACState, boolean>>;
+  onControlChange: (getNextState: (state: HVACState) => HVACState) => void;
 }
 
-export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onControlChange }) => {
+export const ControlPanel: React.FC<ControlPanelProps> = ({ state, pendingFields, onControlChange }) => {
   const updateControl = (getNextState: (state: HVACState) => HVACState) => {
-    const next = getNextState(state);
-    setState(next);
-    onControlChange(next);
+    onControlChange(getNextState);
   };
 
   const togglePower = () => updateControl(prev => ({ ...prev, power: !prev.power }));
@@ -38,6 +36,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onC
     fan: 'shadow-[0_0_20px_rgba(16,185,129,0.15)]',
   };
 
+  const isPending = Object.values(pendingFields).some(Boolean);
+
   return (
     <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xl h-full flex flex-col">
       {/* Header */}
@@ -46,7 +46,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onC
           <h3 className="text-sm font-bold uppercase tracking-widest text-slate-400">AC Unit 01</h3>
           <div className="flex items-center gap-2">
             <div className={cn("w-1.5 h-1.5 rounded-full", state.power ? "bg-emerald-500 animate-pulse" : "bg-slate-300")} />
-            <span className="text-[10px] font-bold text-slate-500 uppercase">{state.power ? 'System Ready' : 'Standby'}</span>
+            <span className="text-[10px] font-bold text-slate-500 uppercase">
+              {isPending ? 'Syncing Command' : state.power ? 'System Ready' : 'Standby'}
+            </span>
           </div>
         </div>
         <button
@@ -68,6 +70,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onC
         <div className="relative flex flex-col items-center">
           <div className={cn(
             "w-full aspect-square max-w-[200px] rounded-full border-8 border-slate-50 bg-white flex flex-col items-center justify-center transition-all duration-500",
+            pendingFields.targetTemp && "opacity-60",
             state.power && modeGlows[state.mode]
           )}>
             <div className="text-slate-400 mb-1 flex items-center gap-1">
@@ -75,17 +78,22 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onC
               <span className="text-[10px] font-bold uppercase tracking-tighter">Target</span>
             </div>
             
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={state.targetTemp}
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 1.1 }}
-                className="text-6xl font-bold font-mono text-slate-900 tabular-nums leading-none"
-              >
-                {state.targetTemp.toFixed(1)}
-              </motion.div>
-            </AnimatePresence>
+            <div className="relative">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={state.targetTemp}
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.1 }}
+                  className="text-6xl font-bold font-mono text-slate-900 tabular-nums leading-none"
+                >
+                  {state.targetTemp.toFixed(1)}
+                </motion.div>
+              </AnimatePresence>
+              {pendingFields.targetTemp && (
+                <LoaderCircle className="absolute -right-6 top-1 w-5 h-5 text-blue-500 animate-spin" />
+              )}
+            </div>
             
             <span className="text-xl font-bold text-slate-400 mt-1">°C</span>
           </div>
@@ -123,6 +131,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onC
                   onClick={() => setMode(m.id as HVACState['mode'])}
                   className={cn(
                     "flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all group",
+                    pendingFields.mode && isActive && "opacity-60",
                     isActive 
                       ? modeColors[m.id] 
                       : "bg-white border-slate-50 text-slate-400 hover:border-slate-200"
@@ -149,6 +158,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({ state, setState, onC
                 onClick={() => setFanSpeed(speed as HVACState['fanSpeed'])}
                 className={cn(
                   "flex-1 py-3 rounded-lg text-[10px] font-bold uppercase transition-all",
+                  pendingFields.fanSpeed && state.fanSpeed === speed && "opacity-60",
                   state.fanSpeed === speed 
                     ? "bg-white text-slate-900 shadow-md ring-1 ring-slate-200" 
                     : "text-slate-400 hover:text-slate-600"

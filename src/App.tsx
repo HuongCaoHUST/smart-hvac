@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Thermometer, 
   Droplets, 
@@ -18,7 +18,7 @@ import mainLogo from '../img/main_logo_2.png';
 import { MetricCard } from './components/MetricCard';
 import { RealTimeChart } from './components/RealTimeChart';
 import { ControlPanel } from './components/ControlPanel';
-import { SensorReading, ChartDataPoint, HVACState, Status, TelemetryResponse, RemoteControlPayload } from './types';
+import { SensorReading, ChartDataPoint, HVACState, Status, TelemetryResponse, RemoteControlPayload, RemoteControlResponse, RemoteControlState } from './types';
 import { cn } from './lib/utils';
 
 // Helper to determine status based on thresholds
@@ -55,6 +55,45 @@ interface HanoiWeather {
   weatherCode: number;
 }
 
+type ControlField = keyof HVACState;
+
+interface PendingControl {
+  commandId: number;
+  previousState: HVACState;
+  desiredState: HVACState;
+  fields: ControlField[];
+}
+
+interface ToastMessage {
+  id: number;
+  type: 'error' | 'info';
+  message: string;
+}
+
+const CONTROL_FIELDS: ControlField[] = ['power', 'mode', 'targetTemp', 'fanSpeed'];
+
+const getOrCreateClientId = () => {
+  const key = 'smart-hvac-client-id';
+  const existing = window.localStorage.getItem(key);
+  if (existing) return existing;
+
+  const next = window.crypto?.randomUUID?.() ?? `client-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  window.localStorage.setItem(key, next);
+  return next;
+};
+
+const remoteToHVACState = (controlState: RemoteControlState): HVACState => ({
+  power: controlState.power,
+  mode: controlState.operationMode,
+  targetTemp: controlState.temp,
+  fanSpeed: controlState.fanPower,
+});
+
+const getControlRevision = (controlState: RemoteControlState) =>
+  controlState.lastModifiedAt || controlState.time;
+
+const formatClientLabel = (id: string) => `Người dùng ${id === 'unknown' ? 'khác' : id.slice(-6)}`;
+
 const getWeatherLabel = (code: number) => {
   if (code === 0) return 'Clear';
   if ([1, 2, 3].includes(code)) return 'Partly Cloudy';
@@ -81,32 +120,113 @@ export default function App() {
     targetTemp: 21.0,
     fanSpeed: 'medium',
   });
+  const [pendingControl, setPendingControl] = useState<PendingControl | null>(null);
+  const [toast, setToast] = useState<ToastMessage | null>(null);
   const [hanoiWeather, setHanoiWeather] = useState<HanoiWeather | null>(null);
   const [isControlStateReady, setIsControlStateReady] = useState(false);
+  const clientId = useMemo(getOrCreateClientId, []);
+  const commandSequenceRef = useRef(0);
+  const hvacStateRef = useRef(hvacState);
+  const pendingControlRef = useRef<PendingControl | null>(null);
+  const controlReadyRef = useRef(false);
+  const lastControlRevisionRef = useRef<string | null>(null);
 
-  const sendRemoteControl = useCallback(async (nextState: HVACState) => {
+  useEffect(() => {
+    hvacStateRef.current = hvacState;
+  }, [hvacState]);
+
+  useEffect(() => {
+    pendingControlRef.current = pendingControl;
+  }, [pendingControl]);
+
+  useEffect(() => {
+    controlReadyRef.current = isControlStateReady;
+  }, [isControlStateReady]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(null), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  const showToast = useCallback((type: ToastMessage['type'], message: string) => {
+    setToast({ id: Date.now(), type, message });
+  }, []);
+
+  const postRemoteControl = useCallback(async (nextState: HVACState, requestedAt: string) => {
     const payload: RemoteControlPayload = {
       device_id: 'hvac-01',
       power: nextState.power,
       temp: nextState.targetTemp,
       operationMode: nextState.mode,
       fanPower: nextState.fanSpeed,
+      clientId,
+      requestedAt,
     };
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 6000);
 
     try {
       const response = await fetch('/api/remote-control', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
         throw new Error(`Remote control request failed: ${response.status}`);
       }
+
+      const result: RemoteControlResponse = await response.json();
+      return remoteToHVACState(result.command);
     } catch (error) {
       console.error(error);
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
     }
-  }, []);
+  }, [clientId]);
+
+  const sendRemoteControl = useCallback(async (getNextState: (state: HVACState) => HVACState) => {
+    const previousState = hvacStateRef.current;
+    const baseState = pendingControlRef.current?.desiredState ?? previousState;
+    const desiredState = getNextState(baseState);
+    const fields = CONTROL_FIELDS.filter(field => previousState[field] !== desiredState[field]);
+    const commandId = commandSequenceRef.current + 1;
+    commandSequenceRef.current = commandId;
+
+    if (fields.length === 0) {
+      pendingControlRef.current = null;
+      setPendingControl(null);
+      return;
+    }
+
+    const nextPendingControl = {
+      commandId,
+      previousState,
+      desiredState,
+      fields,
+    };
+    pendingControlRef.current = nextPendingControl;
+    setPendingControl(nextPendingControl);
+
+    try {
+      const officialState = await postRemoteControl(desiredState, new Date().toISOString());
+      if (pendingControlRef.current?.commandId !== commandId) return;
+
+      setHvacState(officialState);
+      pendingControlRef.current = null;
+      setPendingControl(null);
+    } catch {
+      if (pendingControlRef.current?.commandId !== commandId) return;
+
+      setHvacState(previousState);
+      pendingControlRef.current = null;
+      setPendingControl(null);
+      showToast('error', 'Kết nối tới thiết bị thất bại');
+    }
+  }, [postRemoteControl, showToast]);
 
   // --- DATABASE TELEMETRY ---
   useEffect(() => {
@@ -132,17 +252,39 @@ export default function App() {
 
         const telemetry: TelemetryResponse = await response.json();
         setHistory(telemetry.history);
-        setIsControlStateReady(prevReady => {
-          if (!prevReady && telemetry.controlState) {
-            setHvacState({
-              power: telemetry.controlState.power,
-              mode: telemetry.controlState.operationMode,
-              targetTemp: telemetry.controlState.temp,
-              fanSpeed: telemetry.controlState.fanPower,
-            });
+        if (telemetry.controlState) {
+          const incomingState = remoteToHVACState(telemetry.controlState);
+          const incomingRevision = getControlRevision(telemetry.controlState);
+          const isNewRevision = lastControlRevisionRef.current !== incomingRevision;
+          const isExternalChange = telemetry.controlState.lastModifiedBy !== clientId;
+          const wasReady = controlReadyRef.current;
+
+          setHvacState(prevState => {
+            const pending = pendingControlRef.current;
+            if (!pending) return incomingState;
+
+            return CONTROL_FIELDS.reduce<HVACState>((nextState, field) => {
+              if (pending.fields.includes(field)) {
+                return nextState;
+              }
+
+              return {
+                ...nextState,
+                [field]: incomingState[field],
+              };
+            }, prevState);
+          });
+
+          if (isNewRevision && wasReady && isExternalChange) {
+            showToast('info', `${formatClientLabel(telemetry.controlState.lastModifiedBy)} vừa đổi nhiệt độ`);
           }
-          return true;
-        });
+
+          lastControlRevisionRef.current = incomingRevision;
+        }
+        if (!controlReadyRef.current) {
+          controlReadyRef.current = true;
+          setIsControlStateReady(true);
+        }
         setReadings(prev => prev.map(reading => {
           if (reading.id === 'temp') return updateReading(reading, telemetry.latest.temperature);
           if (reading.id === 'humidity') return updateReading(reading, telemetry.latest.humidity);
@@ -159,7 +301,7 @@ export default function App() {
     const interval = window.setInterval(fetchTelemetry, 2000);
 
     return () => window.clearInterval(interval);
-  }, []);
+  }, [clientId, showToast]);
 
   // --- WEATHER ---
   useEffect(() => {
@@ -202,6 +344,13 @@ export default function App() {
 
   // Derived stats
   const activeAlerts = useMemo(() => readings.filter(r => r.status !== 'good').length, [readings]);
+  const displayHvacState = pendingControl?.desiredState ?? hvacState;
+  const pendingFields = useMemo(() => {
+    return pendingControl?.fields.reduce<Partial<Record<ControlField, boolean>>>((fields, field) => {
+      fields[field] = true;
+      return fields;
+    }, {}) ?? {};
+  }, [pendingControl]);
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 overflow-x-clip selection:bg-blue-500/20">
@@ -307,7 +456,11 @@ export default function App() {
           <div className="lg:col-span-4 space-y-6">
             
             {isControlStateReady ? (
-              <ControlPanel state={hvacState} setState={setHvacState} onControlChange={sendRemoteControl} />
+              <ControlPanel
+                state={displayHvacState}
+                pendingFields={pendingFields}
+                onControlChange={sendRemoteControl}
+              />
             ) : (
               <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xl h-full min-h-[560px] flex flex-col">
                 <div className="flex items-center justify-between mb-6">
@@ -419,6 +572,25 @@ export default function App() {
           </div>
         </div>
       </main>
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            className={cn(
+              "fixed bottom-6 right-6 z-[60] max-w-sm rounded-lg border px-4 py-3 shadow-xl flex items-start gap-3",
+              toast.type === 'error'
+                ? "bg-red-50 border-red-200 text-red-700"
+                : "bg-blue-50 border-blue-200 text-blue-700"
+            )}
+          >
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <p className="text-xs font-bold">{toast.message}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

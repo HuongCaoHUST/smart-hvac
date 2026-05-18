@@ -44,8 +44,18 @@ export interface RemoteControlPayload {
   temp: number;
   operationMode: HVACState['mode'];
   fanPower: HVACState['fanSpeed'];
+  clientId: string;
+  requestedAt: string;
 }
 
 export interface RemoteControlState extends RemoteControlPayload {
   time: string;
+  lastModifiedAt: string;
+  lastModifiedBy: string;
+}
+
+export interface RemoteControlResponse {
+  ok: boolean;
+  topic: string;
+  command: RemoteControlState;
 }
